@@ -1,0 +1,164 @@
+---
+title: "CEVE 101: Project 03"
+author: "Your Name (your netid)"
+date: "2024-10-23"
+output: html_document
+kernel: julia-1.11
+code-annotations: hover
+format:
+    html: default
+    docx: default
+---
+
+
+We begin by loading the required packages.
+
+```{julia}
+using Revise                      # <1>
+using RainwaterHarvesting         # <2>
+```
+
+1. `Revise` allows us to update code without restarting Julia.
+2. We load the `RainwaterHarvesting` package that contains our simulation tools.
+
+### Setting the file path
+
+Next, we specify the path to the rainfall data file and read it in.
+
+```{julia}
+filepath = "data/1.txt" # <1>   
+rainfall_data = RainfallData(filepath) # <2>
+```
+
+1. This is the path to the rainfall data file for the station of interest.
+2. This creates a `RainfallData` object containing the rainfall data for the specified station.
+
+If we dig under the hood a bit, we can see that there are two main pieces of information:
+
+- `station_info`: a dictionary containing information about the station, such as its name and location.
+- `annual_data`: a dictionary mapping years to `AnnualRainfallData` objects, each containing the date and precipitation data for a given year.
+
+### Plotting the Data
+
+We can plot the data for one or all of the years to verify that it looks correct.
+
+```{julia}
+plot(rainfall_data) # <1>
+```
+
+1. This `plot` function is defined in [viz.jl](./RainwaterHarvesting/src/viz.jl) and is a thin wrapper around the Plots.jl package.
+
+### Discussion
+
+*Insert discussion here*
+
+## Understanding the Theoretical Model
+
+Let's explore the model that simulates the rainwater harvesting system.
+
+### Mass Balance Equation
+
+The mass balance model for the rainwater tank is given by:
+
+$$
+V_{t+1} = V_t + Q_t - C_t | 0 \leq V_t \leq V_\text{max}
+$$
+
+- $V_t$: the volume of water in the tank at time $t$
+- $Q_t$ is the volume of water added to the tank at time $t$
+- $C_t$ is the volume of water consumed at time $t$
+- $V_\text{max}$: the maximum volume of the tank
+
+### Inflow ($Q_t$)
+
+Inflow is calculated as
+
+$$
+Q_t = \eta \times A \times \max(P_t - F, 0).
+$$
+
+- $\eta$: the runoff coefficient, which accounts for losses due to evaporation, spilling, etc.
+- $A$: the area of the roof (we will use square meters)
+- $P_t$: the precipitation at time $t$ (we will use millimeters per day)
+- $F$: the first flush volume (we will use millimeters). The first flush volume is often discarded, so that each time it rains the first bit of water (which is usually dirty) is not used (see [here](https://rainwaterharvesting.tamu.edu/pre-storage-treatment/) for more details).
+
+### Consumption
+
+Consumption is modeled as:
+
+$$
+C_t = \begin{cases}
+    74.1 & \quad \text{day of year} > 150 \\
+    0 & \quad \text{day of year} \leq 150
+\end{cases}
+$$
+
+This makes two major assumptiuons.
+First, the household begins using water from the tank after the 150th day of the year.
+This is based on the idea that the rainy season lasts for about the first 150 days of the year, and so they may have other sources of water before then.
+The second assumption is that each household consumes 74.1 liters per day during the dry season.
+How does this compare to your household's water usage?
+
+## Model Implementation and Testing
+
+### Defining the Model Parameters
+
+We can define the model parameters with sensible default values.
+You will have the opportunity to change these values later.
+
+```{julia}
+#| output: false
+param = ModelParameters(          # <1>
+    runoff_coefficient=0.85,      # <2>
+    roof_area_m2=45.0,            # <3>
+    first_flush_mm=2.0,           # <4>
+    tank_capacity_L=16000.0       # <5>
+)
+```
+
+1. This creates a `ModelParameters` object with the specified parameters.
+2. The runoff coefficient ($\eta$) is a measure of how much of the rain that falls on the roof ends up in the tank.
+3. The roof area ($A$) is the area of the roof that the rain falls on.
+4. The first flush volume ($V_f$) is the volume of rain that is discarded because it is dirty.
+5. The tank capacity ($V_\text{max}$) is the maximum volume of the tank.
+
+### Running the Simulation for One Year
+
+Let's run the model for the year 1981.
+
+```{julia}
+rainfall_1981 = rainfall_data.annual_data[1981]    # <1>
+results_1981 = run_timesteps(rainfall_1981, param) # <2>
+p1 = plot(results_1981)                                 # <3>
+```
+
+1. We select the annual rainfall data for the year 1981.
+2. We run the simulation for the year 1981.
+3. We plot the results, again using a `plot` function defined in [viz.jl](./RainwaterHarvesting/src/viz.jl).
+
+To compare rainfall and tank volume:
+
+```{julia}
+p2 = plot(rainfall_1981)
+plot(p2, p1, layout=(2, 1), size=(1000, 700), link=:x)
+```
+
+Observe how the tank's water level responds to rainfall events.
+Note any periods when the tank runs dry or overflows.
+
+### Reliability Analysis
+
+We can run simulations for all years, one at a time, and then check how many times the tank runs dry.
+You can run simulations for all years at once with the following code:
+
+```{julia}
+all_years = sort(collect(keys(rainfall_data.annual_data)))          # <1>
+all_results = [run_timesteps(rainfall_data.annual_data[year], param) for year in all_years]   # <2>
+any_failures = [!isempty(result.failure_dates) for result in all_results]  # <3>
+println("Number of years with failures: ", sum(any_failures), " out of ", length(all_years))  # <4>
+```
+
+1. We get all the years in order.
+2. We run the simulation for each year.
+3. We check if any failures occurred.
+4. We print the number of years with failures and the total number of years.
